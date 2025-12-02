@@ -1,0 +1,82 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+
+# Distribution / packaging
+build/
+dist/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+*.egg
+
+# Testing and coverage
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+coverage.xml
+nosetests.xml
+
+# Jupyter
+.ipynb_checkpoints
+
+# Editor directories and files
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Model artifacts and exports (usually large or binary)
+#models/
+#*.pkl
+#*.joblib
+#modelo_imoveis.pkl
+#modelo_columns.json
+#modelo_metadata.json
+
+# Data files
+dataZAP.csv
+data/
+*.csv
+
+# Environment / credentials
+.env
+.env.*
+credentials.json
+
+# Database files
+*.sqlite3
+*.db
+*.db-journal
+
+# Misc
+*.bak
+*.tmp
+
+# Ignore node_modules if present
+node_modules/
+
+# Ignore compiled C extensions
+*.so
+
+# Ignore wheel files
+*.whl
+
+# Keep README and project files tracked
+!README.md
