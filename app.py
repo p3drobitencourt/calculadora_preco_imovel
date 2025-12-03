@@ -2,18 +2,29 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import joblib
 import numpy as np
+import json
+import os
 
 # 1. Inicializa a aplicação Flask
 app = Flask(__name__)
 CORS(app) # Libera o acesso para o seu futuro site (React)
 
 # 2. Carrega o modelo treinado (O Cérebro)
-# O arquivo 'modelo_imoveis.pkl' DEVE estar na mesma pasta
+metadata_cols = None
+modelo = None
 try:
     modelo = joblib.load('modelo_imoveis.pkl')
+    # attempt to load metadata columns file (if available)
+    if os.path.exists('modelo_columns.json'):
+        with open('modelo_columns.json', 'r', encoding='utf-8') as f:
+            metadata_cols = json.load(f)
+
     print("Modelo carregado com sucesso!")
-except:
+    if metadata_cols is not None:
+        print(f"Modelo espera {len(metadata_cols)} features.")
+except Exception as e:
     print("ERRO CRÍTICO: O arquivo 'modelo_imoveis.pkl' não foi encontrado.")
+    print(e)
 
 # 3. Rota principal (apenas para ver se está vivo)
 @app.route('/')
@@ -24,13 +35,42 @@ def home():
 @app.route('/prever', methods=['POST'])
 def prever():
     dados = request.get_json()
-    
-    # Pega os dados enviados (Area e Quartos)
-    area = float(dados['area'])
-    quartos = int(dados['quartos'])
-    
-    # Prepara para o modelo (o modelo espera uma lista de listas)
-    entrada = [[area, quartos]]
+    # Prepare input for model; this server accepts short names like 'area' and 'quartos' & optional other fields
+    # If metadata columns are present, align the input vector with those columns; otherwise fall back to legacy behavior.
+    if metadata_cols is None:
+        # Backwards compatibility: legacy model expecting [area, quartos]
+        area = float(dados['area'])
+        quartos = int(dados['quartos'])
+        entrada = [[area, quartos]]
+    else:
+        # Build a dict with all columns set to 0, insert values where provided
+        row = {col: 0 for col in metadata_cols}
+
+        # Map common aliased fields
+        if 'area' in dados:
+            if 'listing.usableAreas' in row:
+                row['listing.usableAreas'] = float(dados['area'])
+        if 'quartos' in dados:
+            if 'listing.bedrooms' in row:
+                row['listing.bedrooms'] = int(dados['quartos'])
+        if 'bathrooms' in dados:
+            if 'listing.bathrooms' in row:
+                row['listing.bathrooms'] = float(dados['bathrooms'])
+        if 'parkingSpaces' in dados:
+            if 'listing.parkingSpaces' in row:
+                row['listing.parkingSpaces'] = float(dados['parkingSpaces'])
+        # Handle city and type columns (one-hot columns)
+        if 'city' in dados:
+            city_col = f"listing.address.city_{dados['city']}"
+            if city_col in row:
+                row[city_col] = 1
+        if 'imvl_type' in dados:
+            type_col = f"imvl_type_{dados['imvl_type']}"
+            if type_col in row:
+                row[type_col] = 1
+
+        # Build ordered list of values according to metadata_cols
+        entrada = [[row[c] for c in metadata_cols]]
     
     # Faz a previsão
     preco_estimado = modelo.predict(entrada)[0]
