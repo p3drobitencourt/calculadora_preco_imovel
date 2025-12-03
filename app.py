@@ -1,87 +1,64 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import joblib
-import numpy as np
+import pandas as pd
 import json
 import os
 
-# 1. Inicializa a aplicação Flask
 app = Flask(__name__)
-CORS(app) # Libera o acesso para o seu futuro site (React)
+CORS(app)  # Permite que o Front-end (React) acesse a API
 
-# 2. Carrega o modelo treinado (O Cérebro)
-metadata_cols = None
+# Carregar modelo e metadados
+MODEL_PATH = 'models/modelo_imoveis.pkl'
+META_PATH = 'models/modelo_metadata.json'
+
 modelo = None
-try:
-    modelo = joblib.load('modelo_imoveis.pkl')
-    # attempt to load metadata columns file (if available)
-    if os.path.exists('modelo_columns.json'):
-        with open('modelo_columns.json', 'r', encoding='utf-8') as f:
-            metadata_cols = json.load(f)
+colunas_modelo = []
 
-    print("Modelo carregado com sucesso!")
-    if metadata_cols is not None:
-        print(f"Modelo espera {len(metadata_cols)} features.")
-except Exception as e:
-    print("ERRO CRÍTICO: O arquivo 'modelo_imoveis.pkl' não foi encontrado.")
-    print(e)
+if os.path.exists(MODEL_PATH) and os.path.exists(META_PATH):
+    modelo = joblib.load(MODEL_PATH)
+    with open(META_PATH, 'r') as f:
+        meta = json.load(f)
+        colunas_modelo = meta.get("features", [])
+    print("Modelo e metadados carregados com sucesso.")
+else:
+    print("AVISO: Modelo não encontrado. Execute treinar_modelo.py primeiro.")
 
-# 3. Rota principal (apenas para ver se está vivo)
 @app.route('/')
 def home():
-    return "O Oráculo das Casas está ONLINE!"
+    return "API de Previsão de Imóveis Ativa! Use o endpoint /predict para fazer previsões."
 
-# 4. Rota de Previsão (Onde a mágica acontece)
-@app.route('/prever', methods=['POST'])
-def prever():
-    dados = request.get_json()
-    # Prepare input for model; this server accepts short names like 'area' and 'quartos' & optional other fields
-    # If metadata columns are present, align the input vector with those columns; otherwise fall back to legacy behavior.
-    if metadata_cols is None:
-        # Backwards compatibility: legacy model expecting [area, quartos]
-        area = float(dados['area'])
-        quartos = int(dados['quartos'])
-        entrada = [[area, quartos]]
-    else:
-        # Build a dict with all columns set to 0, insert values where provided
-        row = {col: 0 for col in metadata_cols}
+@app.route('/predict', methods=['POST'])
+def predict():
+    if not modelo:
+        return jsonify({'error': 'Modelo não disponível. Treine o modelo primeiro.'}), 500
 
-        # Map common aliased fields
-        if 'area' in dados:
-            if 'listing.usableAreas' in row:
-                row['listing.usableAreas'] = float(dados['area'])
-        if 'quartos' in dados:
-            if 'listing.bedrooms' in row:
-                row['listing.bedrooms'] = int(dados['quartos'])
-        if 'bathrooms' in dados:
-            if 'listing.bathrooms' in row:
-                row['listing.bathrooms'] = float(dados['bathrooms'])
-        if 'parkingSpaces' in dados:
-            if 'listing.parkingSpaces' in row:
-                row['listing.parkingSpaces'] = float(dados['parkingSpaces'])
-        # Handle city and type columns (one-hot columns)
-        if 'city' in dados:
-            city_col = f"listing.address.city_{dados['city']}"
-            if city_col in row:
-                row[city_col] = 1
-        if 'imvl_type' in dados:
-            type_col = f"imvl_type_{dados['imvl_type']}"
-            if type_col in row:
-                row[type_col] = 1
+    try:
+        dados = request.get_json()
+        
+        # Validar se todos os campos necessários estão presentes
+        input_data = []
+        for col in colunas_modelo:
+            val = dados.get(col)
+            if val is None:
+                return jsonify({'error': f'Campo obrigatório ausente: {col}'}), 400
+            input_data.append(float(val))
 
-        # Build ordered list of values according to metadata_cols
-        entrada = [[row[c] for c in metadata_cols]]
-    
-    # Faz a previsão
-    preco_estimado = modelo.predict(entrada)[0]
-    
-    # Devolve a resposta em formato JSON
-    return jsonify({
-        'area': area,
-        'quartos': quartos,
-        'preco_previsto': round(preco_estimado, 2)
-    })
+        # Criar DataFrame para previsão (mantém o nome das colunas)
+        df_input = pd.DataFrame([input_data], columns=colunas_modelo)
+        
+        # Realizar previsão
+        preco_estimado = modelo.predict(df_input)[0]
 
-# 5. Inicia o servidor
+        return jsonify({
+            'preco_estimado': round(preco_estimado, 2),
+            'mensagem': 'Previsão realizada com sucesso!'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Porta 5000 é padrão para desenvolvimento local
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
