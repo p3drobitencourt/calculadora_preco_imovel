@@ -36,8 +36,8 @@ function App() {
 
   return (
     <div className="App" style={{ padding: '50px', fontFamily: 'Arial' }}>
-      <h1>🏠 Oráculo Imobiliário</h1>
-      <p>Digite os dados da casa para prever o valor divino.</p>
+      <h1>Oráculo Imobiliário</h1>
+      <p>Digite os dados da casa para prever o valor do imóvel.</p>
 
       <form onSubmit={fazerPrevisao} style={{ maxWidth: '400px', margin: '0 auto' }}>
         
