@@ -6,19 +6,35 @@ import joblib
 import json
 import numpy as np
 import os
+import time
 
-# --- 1. CONFIGURAÇÃO E CARREGAMENTO ---
+# --- 1. CONFIGURAÇÃO DE AMBIENTE BLINDADO ---
+# Garante que os caminhos funcionem em qualquer computador ou servidor
 diretorio_base = os.path.dirname(os.path.abspath(__file__))
 caminho_csv = os.path.join(diretorio_base, 'dataZAP.csv')
+caminho_models = os.path.join(diretorio_base, 'models')
 
-print(f"--- INICIANDO TREINAMENTO OTIMIZADO ---")
+# Cria pasta de modelos se não existir
+if not os.path.exists(caminho_models):
+    os.makedirs(caminho_models)
+
+print(f"--- INICIANDO TREINAMENTO COMPLETO (MODO ALUGUEL) ---")
+print(f"Diretório base: {diretorio_base}")
+
+# --- 2. LEITURA BRUTA DOS DADOS ---
+# Lemos com dtype=str para evitar que o Python confunda "1.300" (mil e trezentos) com "1.3" (um vírgula três)
 try:
-    df = pd.read_csv(caminho_csv, sep=';') 
+    print("Carregando arquivo CSV...")
+    df = pd.read_csv(caminho_csv, sep=';', dtype=str, keep_default_na=False)
+    print(f"Total de linhas brutas: {len(df)}")
 except FileNotFoundError:
-    print("ERRO: Arquivo dataZAP.csv não encontrado.")
+    print("ERRO CRÍTICO: O arquivo 'dataZAP.csv' não foi encontrado.")
+    exit()
+except Exception as e:
+    print(f"ERRO DE LEITURA: {e}")
     exit()
 
-# --- 2. SELEÇÃO E LIMPEZA BÁSICA ---
+# --- 3. MAPEAMENTO E SELEÇÃO DE COLUNAS ---
 colunas_map = {
     'listing.usableAreas': 'area',
     'listing.bedrooms': 'quartos',
@@ -27,87 +43,125 @@ colunas_map = {
     'listing.pricingInfo.price': 'preco'
 }
 
-# Filtra colunas e renomeia
-df_selecionado = df[[c for c in colunas_map.keys() if c in df.columns]].rename(columns=colunas_map)
+# Filtra apenas colunas existentes e renomeia
+cols_existentes = [c for c in colunas_map.keys() if c in df.columns]
+df = df[cols_existentes].rename(columns=colunas_map)
 
-# Função para converter textos em números
-def limpar_valor(valor):
-    if pd.isna(valor): return np.nan
-    if isinstance(valor, str):
-        valor = valor.replace('.', '').replace(',', '.')
-        valor = ''.join(filter(lambda x: x.isdigit() or x == '.', valor))
+# --- 4. MOTOR DE LIMPEZA DE DADOS (CLEANING ENGINE) ---
+def limpar_valor_monetario(valor_str):
+    """
+    Converte strings brasileiras complexas para float.
+    Exemplos que ele resolve:
+    'R$ 1.500,00' -> 1500.0
+    '1.200'       -> 1200.0
+    '3500'        -> 3500.0
+    """
+    if pd.isna(valor_str) or valor_str == '': return np.nan
+    
+    # Remove R$ e espaços extras
+    s = str(valor_str).strip().replace('R$', '').strip()
+    
     try:
-        val = float(valor)
-        return val if val > 0 else np.nan
+        # Se tiver vírgula, assume que é separador decimal (centavos)
+        # Primeiro removemos os pontos de milhar (1.500 -> 1500)
+        s = s.replace('.', '')
+        # Depois trocamos a vírgula por ponto (1500,50 -> 1500.50)
+        s = s.replace(',', '.')
+        
+        val = float(s)
+        return val
     except:
         return np.nan
 
+def limpar_numero_simples(valor):
+    """Limpa quartos, vagas e áreas"""
+    try:
+        # Pega apenas números e pontos
+        nums = ''.join(filter(lambda x: x.isdigit() or x == '.', str(valor)))
+        if not nums: return 0.0
+        return float(nums)
+    except:
+        return 0.0
+
+print("Higienizando dados numéricos...")
 # Aplica a limpeza
-for col in df_selecionado.columns:
-    df_selecionado[col] = df_selecionado[col].apply(limpar_valor)
+df['preco'] = df['preco'].apply(limpar_valor_monetario)
+for col in ['area', 'quartos', 'banheiros', 'vagas']:
+    if col in df.columns:
+        df[col] = df[col].apply(limpar_numero_simples)
 
-df_selecionado.dropna(inplace=True)
-qtd_inicial = len(df_selecionado)
+# Remove linhas que falharam na conversão (NaN)
+df.dropna(inplace=True)
 
-# --- 3. REFINAMENTO ESTATÍSTICO (O SEGREDO DA MELHORA) ---
-# Para a Regressão Linear funcionar bem, removemos os extremos (outliers).
-# Vamos manter apenas o "miolo" do mercado (entre os 10% e 90% das faixas de preço e área)
+# --- 5. FILTRO DE MERCADO (ALUGUEL) ---
+# Aqui definimos a regra de negócio: O que é um aluguel válido?
+# Mínimo: R$ 300 (abaixo disso é erro ou vaga de garagem solta)
+# Máximo: R$ 50.000 (acima disso é venda ou aluguel industrial gigante)
+# Área: entre 10m² e 1000m²
 
-# Definindo limites aceitáveis (Regra de Pareto adaptada)
-min_preco = df_selecionado['preco'].quantile(0.10) # Remove os 10% mais baratos
-max_preco = df_selecionado['preco'].quantile(0.90) # Remove os 10% mais caros (luxo/erros)
+df_final = df[
+    (df['preco'] >= 300) & 
+    (df['preco'] <= 50000) & 
+    (df['area'] >= 10) & 
+    (df['area'] <= 1000)
+].copy()
 
-min_area = df_selecionado['area'].quantile(0.10)   # Remove kitnets minúsculas ou erros
-max_area = df_selecionado['area'].quantile(0.90)   # Remove galpões ou mansões gigantes
+qtd = len(df_final)
+print(f"Registros válidos para treinamento: {qtd}")
 
-# Filtragem Agressiva
-df_filtrado = df_selecionado[
-    (df_selecionado['preco'] >= min_preco) & 
-    (df_selecionado['preco'] <= max_preco) &
-    (df_selecionado['area'] >= min_area) & 
-    (df_selecionado['area'] <= max_area)
-]
+if qtd < 100:
+    print("ALERTA: Poucos dados. O modelo pode não ficar preciso.")
+else:
+    print("Dataset robusto identificado. Prosseguindo...")
 
-qtd_final = len(df_filtrado)
-print(f"Dados filtrados: de {qtd_inicial} para {qtd_final} registros.")
-print(f"Considerando imóveis entre R$ {min_preco:,.0f} e R$ {max_preco:,.0f}")
-print(f"Considerando áreas entre {min_area:.0f}m² e {max_area:.0f}m²")
+# --- 6. TREINAMENTO DA INTELIGÊNCIA ARTIFICIAL ---
+print("Treinando modelo de Regressão Linear...")
 
-# --- 4. TREINAMENTO (Linear Regression) ---
-X = df_filtrado[['area', 'quartos', 'banheiros', 'vagas']]
-y = df_filtrado['preco']
+X = df_final[['area', 'quartos', 'banheiros', 'vagas']]
+y = df_final['preco']
 
+# Divisão Treino (80%) / Teste (20%)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 model = LinearRegression()
 model.fit(X_train, y_train)
 
-# --- 5. AVALIAÇÃO ---
+# --- 7. AVALIAÇÃO DE PERFORMANCE ---
 predictions = model.predict(X_test)
+
 r2 = r2_score(y_test, predictions)
 mae = mean_absolute_error(y_test, predictions)
+mse = mean_squared_error(y_test, predictions)
 
-print(f"\n--- PERFORMANCE DO MODELO ---")
-print(f"R² Score (Precisão): {r2:.4f}")
+print(f"\n--- RELATÓRIO DE PERFORMANCE ---")
+print(f"Precisão (R² Score): {r2:.4f} (Quanto mais próximo de 1.0, melhor)")
 print(f"Erro Médio Absoluto: R$ {mae:,.2f}")
 
-# --- 6. SALVAR ---
-if not os.path.exists('models'):
-    os.makedirs('models')
+# --- 8. SALVAMENTO E PERSISTÊNCIA ---
+print("\nSalvando arquivos para deploy...")
 
-joblib.dump(model, 'models/modelo_imoveis.pkl')
+# Salva o modelo binário (.pkl)
+joblib.dump(model, os.path.join(caminho_models, 'modelo_imoveis.pkl'))
 
-# Salva metadata para a API usar
+# Salva Metadados Completos (JSON)
+# Isso é crucial para a API saber o que fazer
 metadata = {
     "features": list(X.columns),
-    "target": "preco",
+    "target": "preco_aluguel",
     "algoritmo": "LinearRegression",
-    "r2_score": r2,
-    "mae": mae,
-    "faixa_preco_treino": [min_preco, max_preco] # Informação útil
+    "performance": {
+        "r2_score": r2,
+        "mae": mae,
+        "mse": mse
+    },
+    "parametros_treino": {
+        "total_registros": qtd,
+        "data_treinamento": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
 }
 
-with open('models/modelo_metadata.json', 'w') as f:
-    json.dump(metadata, f)
+with open(os.path.join(caminho_models, 'modelo_metadata.json'), 'w') as f:
+    json.dump(metadata, f, indent=4)
 
-print("\nModelo atualizado e salvo com sucesso!")
+print(f"SUCESSO: Modelo treinado e salvo em '{caminho_models}'.")
+print("Próximo passo: Execute 'python app.py' para testar a API.")

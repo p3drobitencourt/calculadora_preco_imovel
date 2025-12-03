@@ -1,1 +1,19 @@
-{"features": ["area", "quartos", "banheiros", "vagas"], "target": "preco", "algoritmo": "LinearRegression", "r2_score": 0.38441603720183704, "mae": 2.175725132776026, "faixa_preco_treino": [1.4, 35.0]}
+{
+    "features": [
+        "area",
+        "quartos",
+        "banheiros",
+        "vagas"
+    ],
+    "target": "preco_aluguel",
+    "algoritmo": "LinearRegression",
+    "performance": {
+        "r2_score": 0.5535526895111242,
+        "mae": 1920.6480958638583,
+        "mse": 13203207.800883425
+    },
+    "parametros_treino": {
+        "total_registros": 35450,
+        "data_treinamento": "2025-12-03 11:57:25"
+    }
+}
