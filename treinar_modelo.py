@@ -143,25 +143,34 @@ print("\nSalvando arquivos para deploy...")
 # Salva o modelo binário (.pkl)
 joblib.dump(model, os.path.join(caminho_models, 'modelo_imoveis.pkl'))
 
-# Salva Metadados Completos (JSON)
-# Isso é crucial para a API saber o que fazer
-metadata = {
-    "features": list(X.columns),
-    "target": "preco_aluguel",
-    "algoritmo": "LinearRegression",
-    "performance": {
-        "r2_score": r2,
-        "mae": mae,
-        "mse": mse
-    },
-    "parametros_treino": {
-        "total_registros": qtd,
-        "data_treinamento": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
-}
+    Saves:
+    - model file (joblib) as `models/modelo_imoveis.pkl`
+    - columns json as `models/modelo_columns.json`
+    - a simple metadata json with shape and version info as `models/modelo_metadata.json`
+    """
+    print("Exporting model...")
+    os.makedirs('models', exist_ok=True)
 
-with open(os.path.join(caminho_models, 'modelo_metadata.json'), 'w') as f:
-    json.dump(metadata, f, indent=4)
+    # Save only in models/ folder
+    model_path = os.path.join('models', model_name)
+    columns_path = os.path.join('models', 'modelo_columns.json')
+    metadata_path = os.path.join('models', 'modelo_metadata.json')
+
+    joblib.dump(model, model_path)
+    print(f"✓ Model saved to: {model_path}")
+
+    with open(columns_path, 'w', encoding='utf-8') as f:
+        json.dump(feature_columns, f, ensure_ascii=False, indent=2)
+    print(f"✓ Columns saved to: {columns_path}")
+
+    metadata = {
+        'version': version,
+        'n_features': len(feature_columns),
+        'feature_columns': feature_columns
+    }
+    with open(metadata_path, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    print(f"✓ Metadata saved to: {metadata_path}")
 
 print(f"SUCESSO: Modelo treinado e salvo em '{caminho_models}'.")
 print("Próximo passo: Execute 'python app.py' para testar a API.")

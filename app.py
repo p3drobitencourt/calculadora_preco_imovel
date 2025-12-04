@@ -16,32 +16,81 @@ MODEL_PATH = os.path.join(diretorio_base, 'models', 'modelo_imoveis.pkl')
 META_PATH = os.path.join(diretorio_base, 'models', 'modelo_metadata.json')
 
 modelo = None
-colunas_modelo = []
-info_modelo = {}
 
-def carregar_inteligencia():
-    """Função para carregar o modelo e evitar falhas na inicialização"""
-    global modelo, colunas_modelo, info_modelo
-    try:
-        if os.path.exists(MODEL_PATH) and os.path.exists(META_PATH):
-            modelo = joblib.load(MODEL_PATH)
-            with open(META_PATH, 'r') as f:
-                meta = json.load(f)
-                colunas_modelo = meta.get("features", [])
-                info_modelo = meta.get("performance", {})
-            print(f"✅ Modelo carregado com sucesso! (R²: {info_modelo.get('r2_score', 'N/A'):.2f})")
-        else:
-            print("⚠️ AVISO: Arquivos do modelo não encontrados. Rode o treinar_modelo.py primeiro.")
-    except Exception as e:
-        print(f"❌ Erro fatal ao carregar modelo: {e}")
+# Define o caminho correto para o modelo
+model_path = os.path.join(os.path.dirname(__file__), 'models', 'modelo_imoveis.pkl')
+metadata_path = os.path.join(os.path.dirname(__file__), 'models', 'modelo_columns.json')
 
-# Carrega ao iniciar
-carregar_inteligencia()
+try:
+    modelo = joblib.load(model_path)
+    # attempt to load metadata columns file (if available)
+    if os.path.exists(metadata_path):
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            metadata_cols = json.load(f)
+
+    print("Modelo carregado com sucesso!")
+    if metadata_cols is not None:
+        print(f"Modelo espera {len(metadata_cols)} features.")
+except Exception as e:
+    print("ERRO CRÍTICO: O arquivo do modelo não foi encontrado.")
+    print(f"Caminho esperado: {model_path}")
+    print(e)
 
 @app.route('/')
 def home():
-    """Rota de verificação de saúde da API"""
-    status = "Ativo" if modelo else "Inativo (Modelo não carregado)"
+    return "O Oráculo das Casas está ONLINE!"
+
+# 4. Rota de Previsão (Onde a mágica acontece)
+@app.route('/prever', methods=['POST'])
+def prever():
+    dados = request.get_json()
+    
+    # CORREÇÃO: Definir as variáveis ANTES do if/else para que existam sempre
+    # Usamos .get() e um valor default (0) para segurança
+    area = float(dados.get('area', 0))
+    quartos = int(dados.get('quartos', 0))
+
+    # Se metadata_cols não existir, usa o modo legado
+    if metadata_cols is None:
+        # Backwards compatibility: legacy model expecting [area, quartos]
+        entrada = [[area, quartos]]
+    else:
+        # Build a dict with all columns set to 0
+        row = {col: 0 for col in metadata_cols}
+
+        # Map common aliased fields using the variables we extracted above
+        if 'listing.usableAreas' in row:
+            row['listing.usableAreas'] = area
+        
+        if 'listing.bedrooms' in row:
+            row['listing.bedrooms'] = quartos
+
+        # Outros campos opcionais
+        if 'bathrooms' in dados:
+            if 'listing.bathrooms' in row:
+                row['listing.bathrooms'] = float(dados['bathrooms'])
+        if 'parkingSpaces' in dados:
+            if 'listing.parkingSpaces' in row:
+                row['listing.parkingSpaces'] = float(dados['parkingSpaces'])
+        
+        # Handle city and type columns (one-hot columns)
+        if 'city' in dados:
+            city_col = f"listing.address.city_{dados['city']}"
+            if city_col in row:
+                row[city_col] = 1
+        if 'imvl_type' in dados:
+            type_col = f"imvl_type_{dados['imvl_type']}"
+            if type_col in row:
+                row[type_col] = 1
+
+        # Build ordered list of values according to metadata_cols
+        entrada = [[row[c] for c in metadata_cols]]
+    
+    # Faz a previsão
+    preco_estimado = modelo.predict(entrada)[0]
+    
+    # Devolve a resposta em formato JSON
+    # Agora 'area' e 'quartos' estão garantidamente definidos!
     return jsonify({
         "status": status,
         "mensagem": "API de Previsão de Alugueis operando.",
