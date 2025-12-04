@@ -1,20 +1,16 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import joblib
-import pandas as pd
+import numpy as np
 import json
 import os
-import sys
 
-# Inicialização do Flask
+# 1. Inicializa a aplicação Flask
 app = Flask(__name__)
-CORS(app) # Permite que o Front-end (React/HTML) acesse a API sem bloqueio
+CORS(app) # Libera o acesso para o seu futuro site (React)
 
-# --- CARREGAMENTO DO MODELO ---
-diretorio_base = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(diretorio_base, 'models', 'modelo_imoveis.pkl')
-META_PATH = os.path.join(diretorio_base, 'models', 'modelo_metadata.json')
-
+# 2. Carrega o modelo treinado (O Cérebro)
+metadata_cols = None
 modelo = None
 
 # Define o caminho correto para o modelo
@@ -36,6 +32,7 @@ except Exception as e:
     print(f"Caminho esperado: {model_path}")
     print(e)
 
+# 3. Rota principal (apenas para ver se está vivo)
 @app.route('/')
 def home():
     return "O Oráculo das Casas está ONLINE!"
@@ -92,70 +89,11 @@ def prever():
     # Devolve a resposta em formato JSON
     # Agora 'area' e 'quartos' estão garantidamente definidos!
     return jsonify({
-        "status": status,
-        "mensagem": "API de Previsão de Alugueis operando.",
-        "performance_modelo": info_modelo
+        'area': area,
+        'quartos': quartos,
+        'preco_previsto': round(preco_estimado, 2)
     })
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    """Rota principal que recebe os dados e devolve o preço"""
-    if not modelo:
-        # Tenta recarregar caso tenha falhado antes
-        carregar_inteligencia()
-        if not modelo:
-            return jsonify({'error': 'Modelo de IA não disponível. Contate o suporte.'}), 500
-
-    try:
-        # 1. Receber dados
-        dados = request.get_json()
-        if not dados:
-            return jsonify({'error': 'Nenhum dado JSON enviado.'}), 400
-        
-        # 2. Validar e organizar dados
-        input_data = []
-        erros = []
-        
-        for col in colunas_modelo:
-            valor = dados.get(col)
-            if valor is None:
-                erros.append(f"Campo obrigatório faltando: {col}")
-            else:
-                try:
-                    input_data.append(float(valor))
-                except ValueError:
-                    erros.append(f"O campo '{col}' deve ser um número válido.")
-        
-        if erros:
-            return jsonify({'error': 'Erro de Validação', 'detalhes': erros}), 400
-
-        # 3. Criar DataFrame para previsão
-        df_input = pd.DataFrame([input_data], columns=colunas_modelo)
-        
-        # 4. Fazer a previsão
-        previsao_raw = modelo.predict(df_input)[0]
-
-        # Regra de negócio: Aluguel não pode ser negativo
-        if previsao_raw < 0:
-            previsao_raw = 0
-
-        # 5. Formatação de Dinheiro (R$)
-        preco_formatado = f"R$ {previsao_raw:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-        # 6. Resposta
-        return jsonify({
-            'tipo_previsao': 'Aluguel Mensal',
-            'preco_estimado': round(previsao_raw, 2),
-            'preco_formatado': preco_formatado,
-            'mensagem': 'Cálculo realizado com sucesso.'
-        })
-
-    except Exception as e:
-        # Log do erro no servidor
-        print(f"Erro na predição: {e}")
-        return jsonify({'error': 'Erro interno no servidor de IA.'}), 500
-
+# 5. Inicia o servidor
 if __name__ == '__main__':
-    # Configuração para rodar localmente ou no Azure
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(debug=True, port=5000)
